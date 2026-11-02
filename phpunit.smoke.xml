@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<phpunit bootstrap="vendor/autoload.php" colors="false">
+  <testsuites><testsuite name="smoke"><directory>tests/Smoke</directory></testsuite></testsuites>
+  <php>
+    <env name="APP_ENV" value="local" force="true"/>
+    <env name="APP_DEBUG" value="true" force="true"/>
+    <env name="MAIL_MAILER" value="array" force="true"/>
+    <env name="QUEUE_CONNECTION" value="sync" force="true"/>
+    <env name="SESSION_DRIVER" value="array" force="true"/>
+    <env name="CACHE_STORE" value="array" force="true"/>
+    <env name="DEBUGBAR_ENABLED" value="false" force="true"/>
+  </php>
+</phpunit>

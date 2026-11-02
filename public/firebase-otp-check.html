@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Firebase phone OTP check — SmartBazars</title>
+<style>
+  body{font-family:system-ui,Segoe UI,Roboto,Arial,sans-serif;margin:0;background:#f3f7ff;color:#0A2E73}
+  main{max-width:760px;margin:0 auto;padding:20px 14px 60px}
+  h1{font-size:22px;margin:8px 0}
+  .card{background:#fff;border-radius:12px;padding:16px;margin:12px 0;box-shadow:0 2px 12px rgba(10,46,115,.08)}
+  label{display:block;font-weight:600;margin:8px 0 4px;font-size:14px}
+  input,textarea{width:100%;box-sizing:border-box;padding:10px;border:1px solid #c5d3ee;border-radius:8px;font-size:15px}
+  button{background:#0A2E73;color:#fff;border:0;border-radius:8px;padding:10px 16px;font-weight:700;cursor:pointer;margin:8px 8px 0 0}
+  button.alt{background:#F57C00}
+  pre{background:#0b1220;color:#d6e4ff;padding:12px;border-radius:8px;overflow:auto;font-size:13px;min-height:90px;white-space:pre-wrap}
+  .ok{color:#15803d;font-weight:700}.bad{color:#b91c1c;font-weight:700}.muted{color:#475569;font-size:13px}
+</style>
+</head>
+<body>
+<main>
+  <h1>Firebase phone OTP check</h1>
+  <p class="muted">Tests the exact thing that fails with <b>auth/invalid-app-credential</b>: reCAPTCHA + sending an SMS from <b id="host"></b>. Open it from the same address you use for the site (use <b>localhost</b>, not 127.0.0.1).</p>
+
+  <div class="card">
+    <label>Firebase web config (auto-loaded from <code>/api/settings/firebase-config</code>; paste JSON if empty)</label>
+    <textarea id="cfg" rows="5" placeholder='{"apiKey":"...","authDomain":"...","projectId":"...","appId":"...","messagingSenderId":"..."}'></textarea>
+    <label>Mobile number (+91 added automatically)</label>
+    <input id="phone" inputmode="numeric" maxlength="10" placeholder="9876543210">
+    <button id="b1">1 · Check reCAPTCHA</button>
+    <button id="b2" class="alt">2 · Send OTP</button>
+    <label>OTP</label>
+    <input id="otp" inputmode="numeric" maxlength="6" placeholder="123456">
+    <button id="b3">3 · Verify OTP</button>
+  </div>
+  <div class="card"><b>Result</b><pre id="log"></pre><div id="hint"></div></div>
+</main>
+<script type="module">
+import { initializeApp, getApps } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js';
+import { getAuth, RecaptchaVerifier, signInWithPhoneNumber } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js';
+const $ = id => document.getElementById(id);
+const log = (t, cls) => { $('log').textContent += t + '\n'; };
+$('host').textContent = location.origin;
+const HINTS = {
+  'auth/invalid-app-credential': 'reCAPTCHA / app verification rejected. Fix in this order: (1) Firebase > Authentication > Settings > Authorized domains must contain "' + location.hostname + '" (127.0.0.1 is NOT accepted - use localhost). (2) Google Cloud > APIs & Services > Credentials > your Web API key: if "Application restrictions" is HTTP referrers, add ' + location.origin + '/* ; under API restrictions keep "Identity Toolkit API" and "Firebase ..." APIs allowed. (3) Authentication > Settings > SMS fraud protection / reCAPTCHA: set phone to AUDIT (not ENFORCE) or disable. (4) Make sure the config below is the WEB app of the same project.',
+  'auth/unauthorized-domain': 'Add "' + location.hostname + '" under Authentication > Settings > Authorized domains.',
+  'auth/too-many-requests': 'Firebase blocked this device/IP after repeated failures. Wait 15-60 minutes, switch network, or add a test phone number (Authentication > Sign-in method > Phone > Phone numbers for testing).',
+  'auth/operation-not-allowed': 'Enable Phone sign-in (Authentication > Sign-in method) and allow your country under SMS region policy.',
+  'auth/quota-exceeded': 'Daily SMS quota exhausted. Upgrade to Blaze or use test numbers.',
+  'auth/captcha-check-failed': 'reCAPTCHA failed: same fixes as invalid-app-credential.',
+  'auth/billing-not-enabled': 'Real SMS needs the Blaze plan (billing). Test numbers work without it.',
+};
+let app, auth, verifier, confirmation;
+async function config() {
+  let txt = $('cfg').value.trim();
+  if (!txt) {
+    try { const r = await fetch('/api/settings/firebase-config'); const j = await r.json(); if (j.data) { txt = JSON.stringify(j.data); $('cfg').value = JSON.stringify(j.data, null, 1); } } catch (e) {}
+  }
+  if (!txt) throw new Error('No Firebase config. Paste the web config JSON above.');
+  return JSON.parse(txt);
+}
+async function boot() {
+  const c = await config();
+  log('project: ' + c.projectId + '   authDomain: ' + c.authDomain + '   appId: ' + (c.appId || '').split(':').slice(2,3).join('') + ' app');
+  if (!(c.appId || '').includes(':web:')) log('WARNING: appId is not a WEB app id (should contain ":web:").');
+  app = getApps()[0] || initializeApp(c, 'otpcheck');
+  auth = getAuth(app);
+}
+async function mkVerifier() {
+  if (verifier) { try { verifier.clear(); } catch (e) {} }
+  document.getElementById('rc')?.remove();
+  const h = document.createElement('div'); h.id = 'rc'; h.style.cssText = 'position:fixed;left:-9999px;'; document.body.appendChild(h);
+  verifier = new RecaptchaVerifier(auth, 'rc', { size: 'invisible' });
+  await verifier.render();
+}
+function fail(e) {
+  log('FAILED: ' + (e.code || e.name) + ' — ' + (e.message || ''));
+  $('hint').innerHTML = '<p class="bad">' + (HINTS[e.code] || 'See the error code above.') + '</p>';
+}
+$('b1').onclick = async () => { $('log').textContent = ''; $('hint').innerHTML = ''; try { await boot(); await mkVerifier(); log('reCAPTCHA rendered OK'); $('hint').innerHTML = '<p class="ok">reCAPTCHA loads. Now try step 2.</p>'; } catch (e) { fail(e); } };
+$('b2').onclick = async () => {
+  $('log').textContent = ''; $('hint').innerHTML = '';
+  try { await boot(); await mkVerifier();
+    const p = '+91' + $('phone').value.replace(/\D/g, '').slice(-10);
+    log('sending OTP to ' + p + ' ...');
+    confirmation = await signInWithPhoneNumber(auth, p, verifier);
+    log('OTP SENT OK'); $('hint').innerHTML = '<p class="ok">Firebase accepted the request — phone OTP works from this origin.</p>';
+  } catch (e) { fail(e); }
+};
+$('b3').onclick = async () => { try { const r = await confirmation.confirm($('otp').value.trim()); log('VERIFIED: ' + r.user.phoneNumber); $('hint').innerHTML = '<p class="ok">OTP verified.</p>'; } catch (e) { fail(e); } };
+</script>
+</body>
+</html>
